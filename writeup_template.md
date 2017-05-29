@@ -1,129 +1,49 @@
-#**Behavioral Cloning** 
+## Approach
+Initially, I followed the approach that created a small model By training with my collected data and improving the model. The best results were  achieved with VGG type network, where there are multiple convolution layers with a small 3x3  kernel following a maxpool layer that reduces the dimensions, but 2x2 convolution layers with 3 fully connected layers  gave better results, 
 
-##Writeup Template
-
-###You can use this file as a template for your writeup if you want to submit it as a markdown file, but feel free to use some other method and submit a pdf if you prefer.
-
----
-
-**Behavioral Cloning Project**
-
-The goals / steps of this project are the following:
-* Use the simulator to collect data of good driving behavior
-* Build, a convolution neural network in Keras that predicts steering angles from images
-* Train and validate the model with a training and validation set
-* Test that the model successfully drives around track one without leaving the road
-* Summarize the results with a written report
+## Challenges
+A number of challenges were faced during the project:
+### Input Data gathering
+Input data proved to be more significant than initially expected and took longer on AWS becuase it took two days to train and I"m not sure why.. My expectation was that it would take an hour or two with the GPU since it took over three days to train on my local machine. )
 
 
-[//]: # (Image References)
+### Number of various parameters
+The model consisted on many parameters that each affected the model behavior when simulating (number or epochs, model architecture, layer sizes, etc). The challenge with that was, that there was no good measure how to evaluate model accuracy because even if validation set was performing well, it did not guarantee predictable behavior in all track locations, it ensured that for most of the track it behaves better.
 
-[image1]: ./examples/placeholder.png "Model Visualization"
-[image2]: ./examples/placeholder.png "Grayscaling"
-[image3]: ./examples/placeholder_small.png "Recovery Image"
-[image4]: ./examples/placeholder_small.png "Recovery Image"
-[image5]: ./examples/placeholder_small.png "Recovery Image"
-[image6]: ./examples/placeholder_small.png "Normal Image"
-[image7]: ./examples/placeholder_small.png "Flipped Image"
+## Model network architecture
+Initially, several models were tested and one of the best results was with the above model. Later 3rd convolution layer was added as well as intermediate connections to first fully connected layer.
 
-## Rubric Points
-###Here I will consider the [rubric points](https://review.udacity.com/#!/rubrics/432/view) individually and describe how I addressed each point in my implementation.  
+The first layer of the network was 3x1x1 convolution that I used also on the traffic sign classifier, in order for the model to be able to adjust parameters for the colorspace. As the conversion between various color spaces, e.g. RGB to HSL is a multiplication of each channel to get the new color channel then this layer is added for the model to train such behavior if necessary.
 
----
-###Files Submitted & Code Quality
+### Why VGG type network
+I like the VGG type network when there are convolution layers that have small kernel and does not affect dimensions with a mix of maxpool layers to reduce dimensions because the model is quite straight forward in terms of input and output shapes. Each high level in this network reduces dimensions by two and has inside several convolution layers.<br/> For me, this model worked very well on traffic sign classifier and also turned out to have good results on this assignment.<br/>
+One consideration is that as the input image was not of the dimensions of power of 2, it had a reduction from a dimension of 5 to a dimension of 2 in last maxpool layer. The loss of data was somewhat compensated with stacking also intermediate layers.
 
-####1. Submission includes all required files and can be used to run the simulator in autonomous mode
+### Why stacking intermediate layers
+Results from the intermediate maxpool layers also were passed to final fully connected layer. This was done in order not to loose valuable features if there are such in the middle of the network. This gave improved results, especially in the left turn after the bridge. After maxpool layer data is passed to next convolution layer and as well it is flattened and passed to first fully connected layer.
 
-My project includes the following files:
-* model.py containing the script to create and train the model
-* drive.py for driving the car in autonomous mode
-* model.h5 containing a trained convolution neural network 
-* writeup_report.md or writeup_report.pdf summarizing the results
+### Why Adam optimizer
+Also in this assignment Adam optimizer was chosen, because it has fewer hyperparameters to tune). I am still at the stage when I am learning models and generic approach and even without such hyperparameters, there is a lot of other parameters to tune.I am still in a place, where more coudl be done reliably, but do to time constraints I'm satified with the current peformance..
 
-####2. Submission includes functional code
-Using the Udacity provided simulator and my drive.py file, the car can be driven autonomously around the track by executing 
-```sh
-python drive.py model.h5
-```
+### Number or epochs
+In the final solution, a number of epochs are 5. Larger values that that, started to overfit the model and in the simulator it meant that it preferred to drive straight, therefore starting to miss sharp turns. Less that that and simulator model oscillated more from side to side over the road.
 
-####3. Submission code is usable and readable
+### Data cleanup
+From the Udacity dataset, there was some additional cleanup made in the regions where model wanted to behave not according to intention. I checked the images where there is right turn with the red and white borders (to improve results on the 2nd corner after the bridge), for those images, if the steering angle was 0, then they were removed completely from the input dataset.<br/>
+Also similar was done to the images for 1st left turn after the bridge, if the angle was 0 then they were removed. This allowed to navigate those corners more sharply and drive the track.
 
-The model.py file contains the code for training and saving the convolution neural network. The file shows the pipeline I used for training and validating the model, and it contains comments to explain how the code works.
+### Camera selection
+Initially, the model was trained on center camera, however, it was oscillating quite a lot in the middle of the track and there was very poor recovery. I decided to add also left and right image, with the angle adjustment of 0.08.
+This parameter was tuned by trial and error. Initially chosen a larger parameter, and then lowered it so that critical corners are still navigated successfully. The larger the parameter the more oscillation also on the straight track, but the recovery is improved.<br/>
+Also tested if only the left and right camera is used without the central camera. This turned out to have the best results. The oscillation was lower that training with all 3 cameras and much better recovery. My hypothesis is that this is because there is a lot of camera data with 0 steering angle, but slightly different car alignments to the track axis. This slightly varying data confuses model training and provides more erratic weights. If there is only left and right camera data with angle adjustment of +/-0.08, then there is almost no data with 0 steering angle.<br/> Possibly this could be also done with altering initial dataset and removing 0 steering data, but that would require additional data collection.
 
-###Model Architecture and Training Strategy
+### Region selection and downsampling
+Vertical region from above car and below around the horizon was chosen with full width.<br/>
+Also the each second pixel was taken in order to reduce image dimensions.
 
-####1. An appropriate model architecture has been employed
+### Normalization
+Input RGB images of uint8 values of 0-255 were normalized to -1.0 to 1.0 floating values. I also observed that if the values are normalized then training performs better (gets accuracy quicker) as the weights are more uniform.
 
-My model consists of a convolution neural network with 3x3 filter sizes and depths between 32 and 128 (model.py lines 18-24) 
-
-The model includes RELU layers to introduce nonlinearity (code line 20), and the data is normalized in the model using a Keras lambda layer (code line 18). 
-
-####2. Attempts to reduce overfitting in the model
-
-The model contains dropout layers in order to reduce overfitting (model.py lines 21). 
-
-The model was trained and validated on different data sets to ensure that the model was not overfitting (code line 10-16). The model was tested by running it through the simulator and ensuring that the vehicle could stay on the track.
-
-####3. Model parameter tuning
-
-The model used an adam optimizer, so the learning rate was not tuned manually (model.py line 25).
-
-####4. Appropriate training data
-
-Training data was chosen to keep the vehicle driving on the road. I used a combination of center lane driving, recovering from the left and right sides of the road ... 
-
-For details about how I created the training data, see the next section. 
-
-###Model Architecture and Training Strategy
-
-####1. Solution Design Approach
-
-The overall strategy for deriving a model architecture was to ...
-
-My first step was to use a convolution neural network model similar to the ... I thought this model might be appropriate because ...
-
-In order to gauge how well the model was working, I split my image and steering angle data into a training and validation set. I found that my first model had a low mean squared error on the training set but a high mean squared error on the validation set. This implied that the model was overfitting. 
-
-To combat the overfitting, I modified the model so that ...
-
-Then I ... 
-
-The final step was to run the simulator to see how well the car was driving around track one. There were a few spots where the vehicle fell off the track... to improve the driving behavior in these cases, I ....
-
-At the end of the process, the vehicle is able to drive autonomously around the track without leaving the road.
-
-####2. Final Model Architecture
-
-The final model architecture (model.py lines 18-24) consisted of a convolution neural network with the following layers and layer sizes ...
-
-Here is a visualization of the architecture (note: visualizing the architecture is optional according to the project rubric)
-
-![alt text][image1]
-
-####3. Creation of the Training Set & Training Process
-
-To capture good driving behavior, I first recorded two laps on track one using center lane driving. Here is an example image of center lane driving:
-
-![alt text][image2]
-
-I then recorded the vehicle recovering from the left side and right sides of the road back to center so that the vehicle would learn to .... These images show what a recovery looks like starting from ... :
-
-![alt text][image3]
-![alt text][image4]
-![alt text][image5]
-
-Then I repeated this process on track two in order to get more data points.
-
-To augment the data sat, I also flipped images and angles thinking that this would ... For example, here is an image that has then been flipped:
-
-![alt text][image6]
-![alt text][image7]
-
-Etc ....
-
-After the collection process, I had X number of data points. I then preprocessed this data by ...
-
-
-I finally randomly shuffled the data set and put Y% of the data into a validation set. 
-
-I used this training data for training the model. The validation set helped determine if the model was over or under fitting. The ideal number of epochs was Z as evidenced by ... I used an adam optimizer so that manually training the learning rate wasn't necessary.
+## Reflection
+This was a time consuming project due to training issues. Also learning abotu cconvolutional networks and how to  operate them was challenging.<br/>
+I value this a lot as a learning experience and that I was able to reach a result of driving the lap successfully. This model definitely could be improved and especially with the additional data that can be collected and properly annotated.<br/>
