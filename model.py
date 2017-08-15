@@ -1,139 +1,109 @@
-import matplotlib.image as mpimg
-from sklearn.model_selection import train_test_split
-import tensorflow as tf
-import numpy as np
+import os
 import csv
-from keras.models import Sequential, Model
-from keras.layers import Conv2D, ConvLSTM2D, Dense, MaxPooling2D, Dropout, Flatten, Reshape, merge, Input
-from keras.optimizers import Adam
+import cv2
+import numpy as np
 
-flags = tf.app.flags
-FLAGS = flags.FLAGS
+import sklearn
+import keras
+from keras.models import Sequential
+from keras.layers import Flatten, Dense, Lambda
+#from keras.layers.core import Dense, Activation, Flatten, Lambda
+from keras.layers.convolutional import Convolution2D, Cropping2D
+from keras.layers.pooling import MaxPooling2D 
+import matplotlib.pyplot as plt
 
-flags.DEFINE_string('image_dir', 'backup/Training/IMG/', 'Simulator Image data')
-flags.DEFINE_string('data_path', 'backup/Training/driving_log.csv', 'Simulator CSV')
-flags.DEFINE_float('learn_rate', 0.0001, 'Trainign learning rate')
 
-print ('Init completed')
 
-with open(FLAGS.data_path, 'r') as f:
-    reader = csv.reader(f)
-    csv = np.array([row for row in reader])
-# center image, left image, right image
-# steering (-0.8, 0.8)
-# throttle (0, 1)
-# brake (0, 1)
-# speed (0, 9.8)
 
-# Process single image
-def proc_img(img): # input is 160x320x3
-    img = img[59:138:2, 0:-1:2, :] # select vertical region and take each second pixel to reduce image dimensions
-    img = (img / 127.5) - 1.0 # normalize colors from 0-255 to -1.0 to 1.0
-    return img # return 40x160x3 image
+np.random.seed(23)
 
-# Read image names and remove IMG/ prefix
-#image_names_center = np.array(csv[:,0]) # not used it in this model
-image_names_left = np.array(csv[:,1])
-image_names_right = np.array(csv[:,2])
-image_names_full = np.concatenate((image_names_left, image_names_right))
-# read steering data and apply adjustment for left / right images
-y_data = np.array(csv[:,3], dtype=float)
-y_data_left = y_data+0.08
-y_data_right = y_data-0.08
-y_data_full = np.concatenate((y_data_left, y_data_right))
-print ('CSV loaded')
+samples = []
+#with open('./driving_log.csv') as csvfile:
+with open('./training/driving_log.csv') as csvfile:
+    reader = csv.reader(csvfile)
+    next(reader,None)
+    for line in reader:
+        samples.append(line)
 
-# Random sort for data and split test and validation sets
-def newRandomTestValidationSplit(X, y):
-    X_tr, X_val, y_tr, y_val = train_test_split(X, y, test_size=0.01, random_state=111)
-    return X_tr, X_val, y_tr, y_val
+from sklearn.model_selection import train_test_split
+train_samples, validation_samples = train_test_split(samples, test_size=0.05, random_state = 23)
 
-# Batch generator for training data
-def generate_image_batch_tr(names, y_data, batch_size = 32):
-    total_items = len(names)
-    curr_item = 0
-    while (True):
-        image_data = np.zeros((batch_size,40, 160, 3),dtype=float)
-        steering_data = np.zeros((batch_size),dtype=float)
-        for j in range(batch_size):
-            image_name = names[curr_item][4:]
-            image = mpimg.imread(FLAGS.image_dir+image_name)
-            image_data[j] = proc_img(image)
-            steering_data[j] = y_data[curr_item]
-            curr_item = (curr_item+1)%total_items
-        yield image_data, steering_data
+print(len(samples))
+def generator(samples, batch_size=32):
+    num_samples = (len(samples))
+    print(num_samples)
+    
+    while 1: # Loop forever so the generator never terminates
+        #np.random.shuffle(samples)
+        for offset in range(0, num_samples, batch_size):
+            batch_samples = samples[offset:offset+batch_size]
 
-# Batch generator for validation data (in this implementation same as for training data)
-def generate_image_batch(names, y_data, batch_size = 32):
-    total_items = len(names)
-    curr_item = 0
-    while (True):
-        image_data = np.zeros((batch_size,40, 160, 3),dtype=float)
-        steering_data = np.zeros((batch_size),dtype=float)
-        for j in range(batch_size):
-            image_name = names[curr_item][4:]
-            image = mpimg.imread(FLAGS.image_dir+image_name)
-            image_data[j] = proc_img(image)
-            steering_data[j] = y_data[curr_item]
-            curr_item = (curr_item+1)%total_items
-        yield image_data, steering_data
+            images = []
+            angles = []
+            for batch_sample in batch_samples:
+                for i in range(3):
+                    #name = './IMG/'+batch_sample[i].split('/')[-1]
+                    name = './training/IMG/'+batch_sample[i].split('/')[-1]
+                    image = cv2.imread(name)
+                    images.append(image)
+                  
+                correction = 0.2    
+                angle = float(batch_sample[3])
+                angles.append(angle)
+                angles.append(angle+correction)
+                angles.append(angle-correction)
+                
+            augmented_images = []
+            augmented_angles = []
+            for image, angle in zip(images, angles):
+                augmented_images.append(image)
+                augmented_angles.append(angle)
+                flipped_image = cv2.flip(image, 1)
+                flipped_angle = float(angle) * -1.0
+                augmented_images.append(flipped_image)
+                augmented_angles.append(flipped_angle)
 
-# ----------------------
-# Model - ideas from VG type network
-inp = Input(shape=(40,160,3))
-# First convolution is for model to determine the 'best' colorspace weights
-x = Conv2D(3, 1, 1, border_mode='same', activation='relu')(inp)
-# Reduce dimensions
-x = MaxPooling2D((2,2))(x) #20x80
+            # trim image to only see section with road
+            X_train = np.array(images)
+            y_train = np.array(angles)
+            #print(X_train, y_train)
+            
+            yield sklearn.utils.shuffle(X_train, y_train, random_state = 23)
+            #return sklearn.utils.shuffle(X_train, y_train)
 
-# First convolution layer
-x1 = Conv2D(32, 3, 3, border_mode='same', activation='relu')(x)
-x1 = Conv2D(32, 3, 3, border_mode='same', activation='relu')(x1)
-x1 = MaxPooling2D((2,2))(x1) #10x40
-x1 = Dropout(0.5)(x1)
-flat1 = Flatten()(x1) # Used for the merge before first fully connected layer
+# compile and train the model using the generator function
+train_generator = generator(train_samples, batch_size=15)
+validation_generator = generator(validation_samples, batch_size=15)
 
-# Second convolution layer
-x2 = Conv2D(64, 3, 3, border_mode='same', activation='relu')(x1)
-x2 = Conv2D(64, 3, 3, border_mode='same', activation='relu')(x2)
-x2 = MaxPooling2D((2,2))(x2) #5x20
-x2 = Dropout(0.5)(x2)
-flat2 = Flatten()(x2) # Used for the merge before first fully connected layer
+model = Sequential()
+# Preprocess incoming data, centered around zero with small standard deviation 
 
-# Second convolution layer
-x3 = Conv2D(64, 3, 3, border_mode='same', activation='relu')(x2)
-x3 = Conv2D(64, 3, 3, border_mode='same', activation='relu')(x3)
-x3 = MaxPooling2D((2,2))(x3) #2x10
-x3 = Dropout(0.5)(x3)
-flat3 = Flatten()(x3) # Used for the merge before first fully connected layer
+model.add(Lambda(lambda x: x/ 255.0 - 0.5, input_shape= (160,320,3)))
+model.add(Cropping2D(cropping=((70, 25), (0,0))))
+model.add(Convolution2D(24,5, 5,subsample=(2,2),activation='relu'))
+model.add(Convolution2D(36,5, 5, subsample=(2,2),activation='relu'))
+model.add(Convolution2D(48,5, 5, subsample=(2,2),activation='relu'))
+model.add(Convolution2D(64,3, 3, activation='relu'))
+model.add(Convolution2D(64,3, 3, activation='relu'))
+model.add(Flatten())
+model.add(Dense(100))
+model.add(Dense(50))
+model.add(Dense(10))
+model.add(Dense(1))
 
-# Merge the flattened ouputs after each convolution layer
-x4 = merge([flat1, flat2, flat3], mode='concat')
-# Fully connected layers
-x5 = Dense(512, activation='relu')(x4)
-x6 = Dense(128, activation='relu')(x5)
-x7 = Dense(16, activation='relu')(x6)
-out = Dense(1, activation='linear')(x7)
+model.compile(loss='mse', optimizer='adam')
+history_object = model.fit_generator(train_generator, samples_per_epoch= len(train_samples)*6, validation_data=validation_generator, nb_val_samples=len(validation_samples)*6, nb_epoch=5, verbose=1)
 
-model = Model(input=inp, output=out)
-model.summary()
+print(history_object.history.keys())
+### plot the training and validation loss for each epoch
+print(history_object.history['loss'])
+#plt.plot(history_object.history['loss'])
+#plt.plot(history_object.history['val_loss'])
+#plt.title('model mean squared error loss')
+#plt.ylabel('mean squared error loss')
+#plt.xlabel('epoch')
+#plt.legend(['training set', 'validation set'], loc='upper right')
+#plt.show()
 
-# Compile, train and save
-model.compile(optimizer=Adam(lr=FLAGS.learn_rate), loss='mse')
-print ('Split data')
-X_tr_names, X_val_names, y_tr, y_val = newRandomTestValidationSplit(image_names_full, y_data_full)
 
-print ('Start training')
-# Training and validation inputs are fed from generators
-# Number of samples based on data_set size and adjusted to fit batch size
-history = model.fit_generator(generate_image_batch_tr(X_tr_names, y_tr, 64),samples_per_epoch=15744,
-                              nb_epoch=5,
-                              validation_data=generate_image_batch(X_val_names, y_val, 32),
-                              nb_val_samples=160)
-# Save model
-json = model.to_json()
-model.save_weights('model.h5')
-with open('model.json', 'w') as f:
-    f.write(json)
-
-print ('Model saved')
+model.save('model.h5')

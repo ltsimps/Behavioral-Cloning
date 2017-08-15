@@ -1,0 +1,12 @@
+runs/
+videos/
+training/
+backuptraining/
+Contents/
+environment-gpu.yml
+Dockerfile.gpu
+jupyter_notebook_config.py
+meta_windows_patch.yml
+run.sh
+environment.yml
+Dockerfile.cpu
